@@ -21,7 +21,7 @@ using namespace v8u;
 namespace robotskirt {
 #define ROBOTSKIRT_VERSION 2,7,1  //comma-separated
 
-// Constants taken from the official Sundown executable 
+// Constants taken from the official Sundown executable
 #define OUTPUT_UNIT 64
 #define DEFAULT_MAX_NESTING 16
 
@@ -30,7 +30,7 @@ namespace robotskirt {
 ////////////////////////////////////////////////////////////////////////////////
 
 // Credit: @samcday
-// http://sambro.is-super-awesome.com/2011/03/03/creating-a-proper-buffer-in-a-node-c-addon/ 
+// http://sambro.is-super-awesome.com/2011/03/03/creating-a-proper-buffer-in-a-node-c-addon/
 #define MAKE_FAST_BUFFER(NG_SLOW_BUFFER, NG_FAST_BUFFER)      \
   Local<Function> NG_JS_BUFFER = Local<Function>::Cast(       \
     Context::GetCurrent()->Global()->Get(                     \
@@ -107,12 +107,16 @@ private:
 // SIGNATURES
 enum CppSignature {
     void_BUF1,
+    void_BUF1UINT,
     void_BUF2,
     void_BUF2INT,
+    void_BUF2UINT,
     void_BUF3,
      int_BUF1,
+     int_BUF1UINT,
      int_BUF2,
      int_BUF2INT,
+     int_BUF2UINT,
      int_BUF4
 };
 
@@ -197,7 +201,7 @@ public:
         V8_UNWRAP(FunctionData, args)
         return inst->wrapper_(inst, args);
     }
-    
+
     NODE_DEF_TYPE("NativeFunction") {
         V8_DEF_METHOD(ToString, "toString");
         V8_DEF_METHOD(ToString, "inspect");
@@ -254,6 +258,18 @@ Local<Object> jsFunction(void* func, CppSignature sig, PassInvocationCallback wr
     }
 WRAPPERS(BUF1)
 
+#define BUF1UINT_WRAPPER(RET)                                                      \
+    Handle<Value> BUF1UINT_wrapper_##RET(FunctionData* inst, const Arguments& args) {\
+        if(args.Length()<1) return ThrowException(RangeErr("Not enough arguments."));\
+                                                                               \
+        BufWrap ob (bufnew(W_OUTPUT_UNIT));                                    \
+        WRAPPER_CALL_##RET() ((RET(*)(buf*, unsigned int, void*))inst->getFunction())\
+                (*ob, Uint(args[0]),  inst->getOpaque());                      \
+        WRAPPER_POST_CALL_##RET()                                              \
+        return toString(*ob);                                                  \
+    }
+WRAPPERS(BUF1UINT)
+
 #define BUF2_WRAPPER(RET)                                                      \
     Handle<Value> BUF2_wrapper_##RET(FunctionData* inst, const Arguments& args) {\
         if(args.Length()<1) return ThrowException(RangeErr("Not enough arguments."));\
@@ -285,6 +301,22 @@ WRAPPERS(BUF2)
         return toString(*ob);                                                  \
     }
 WRAPPERS(BUF2INT)
+
+#define BUF2UINT_WRAPPER(RET)                                                  \
+    Handle<Value> BUF2UINT_wrapper_##RET(FunctionData* inst, const Arguments& args) {\
+        if(args.Length()<2) return ThrowException(RangeErr("Not enough arguments."));\
+        String::Utf8Value* texts = NULL;                                       \
+        buf* text = NULL;                                                      \
+        makeBuf(text, texts, args[0]);                                         \
+                                                                               \
+        BufWrap ob (bufnew(W_OUTPUT_UNIT));                                    \
+        WRAPPER_CALL_##RET() ((RET(*)(buf*, const buf*, unsigned int, void*))inst->getFunction())\
+                (*ob, text, Uint(args[1]),  inst->getOpaque());                \
+        if (texts != NULL) { delete texts; delete text; }                      \
+        WRAPPER_POST_CALL_##RET()                                              \
+        return toString(*ob);                                                  \
+    }
+WRAPPERS(BUF2UINT)
 
 #define BUF3_WRAPPER(RET)                                                      \
     Handle<Value> BUF3_wrapper_##RET(FunctionData* inst, const Arguments& args) {\
@@ -359,6 +391,24 @@ WRAPPERS(BUF4)
         return BINDER_RETURN_##RET;                                            \
     }
 
+#define BUF1UINT_BINDER(CPPFUNC, RET)                                          \
+    static RET CPPFUNC##_binder(struct buf *ob, unsigned int num, void *opaque) {\
+        HandleScope scope;                                                     \
+                                                                               \
+        /*Convert arguments*/                                                  \
+        Handle<Value> args [1] = {Uint(num)};                                  \
+                                                                               \
+        /*Call it!*/                                                           \
+        TryCatch trycatch;                                                     \
+        Local<Value> ret = ((RendererData*)opaque)->CPPFUNC->CallAsFunction(Context::GetCurrent()->Global(), 1, args);\
+        if (trycatch.HasCaught())                                              \
+            V8_THROW(trycatch.Exception());                                    \
+        /*Convert the result back*/                                            \
+        if (ret->IsFalse()) return BINDER_RETURN_NULL_##RET;                   \
+        putToBuf(ob, ret);                                                     \
+        return BINDER_RETURN_##RET;                                            \
+    }
+
 #define BUF2_BINDER(CPPFUNC, RET)                                              \
     static RET CPPFUNC##_binder(struct buf *ob, const struct buf *text, void *opaque) {\
         HandleScope scope;                                                     \
@@ -383,6 +433,24 @@ WRAPPERS(BUF4)
                                                                                \
         /*Convert arguments*/                                                  \
         Handle<Value> args [2] = {toString(text), Int(flags)};                 \
+                                                                               \
+        /*Call it!*/                                                           \
+        TryCatch trycatch;                                                     \
+        Local<Value> ret = ((RendererData*)opaque)->CPPFUNC->CallAsFunction(Context::GetCurrent()->Global(), 2, args);\
+        if (trycatch.HasCaught())                                              \
+            V8_THROW(trycatch.Exception());                                    \
+        /*Convert the result back*/                                            \
+        if (ret->IsFalse()) return BINDER_RETURN_NULL_##RET;                   \
+        putToBuf(ob, ret);                                                     \
+        return BINDER_RETURN_##RET;                                            \
+    }
+
+#define BUF2UINT_BINDER(CPPFUNC, RET)                                           \
+    static RET CPPFUNC##_binder(struct buf *ob, const struct buf *text, unsigned int num, void *opaque) {\
+        HandleScope scope;                                                     \
+                                                                               \
+        /*Convert arguments*/                                                  \
+        Handle<Value> args [2] = {toString(text), Uint(num)};                  \
                                                                                \
         /*Call it!*/                                                           \
         TryCatch trycatch;                                                     \
@@ -441,6 +509,14 @@ WRAPPERS(BUF4)
                 rend->CPPFUNC##_opaque);                                       \
     }
 
+#define BUF1UINT_FORWARDER(CPPFUNC, RET)                                       \
+    static RET CPPFUNC##_forwarder(struct buf *ob, unsigned int num, void *opaque) {\
+        RendererData* rend = (RendererData*)opaque;                            \
+        return ((RET(*)(struct buf *ob, unsigned int num, void *opaque))rend->CPPFUNC##_orig)(\
+                ob, num,                                                       \
+                rend->CPPFUNC##_opaque);                                       \
+    }
+
 #define BUF2_FORWARDER(CPPFUNC, RET)                                           \
     static RET CPPFUNC##_forwarder(struct buf *ob, const struct buf *text, void *opaque) {\
         RendererData* rend = (RendererData*)opaque;                            \
@@ -454,6 +530,14 @@ WRAPPERS(BUF4)
         RendererData* rend = (RendererData*)opaque;                            \
         return ((RET(*)(struct buf *ob, const struct buf *text, int flags, void *opaque))rend->CPPFUNC##_orig)(\
                 ob, text, flags,                                               \
+                rend->CPPFUNC##_opaque);                                       \
+    }
+
+#define BUF2UINT_FORWARDER(CPPFUNC, RET)                                       \
+    static RET CPPFUNC##_forwarder(struct buf *ob, const struct buf *text, unsigned int num, void *opaque) {\
+        RendererData* rend = (RendererData*)opaque;                            \
+        return ((RET(*)(struct buf *ob, const struct buf *text, unsigned int num, void *opaque))rend->CPPFUNC##_orig)(\
+                ob, text, num,                                               \
                 rend->CPPFUNC##_opaque);                                       \
     }
 
@@ -561,6 +645,8 @@ public:
     RENDFUNC_DATA(table)
     RENDFUNC_DATA(table_row)
     RENDFUNC_DATA(table_cell)
+    RENDFUNC_DATA(footnotes)
+    RENDFUNC_DATA(footnote_def)
     RENDFUNC_DATA(autolink)
     RENDFUNC_DATA(codespan)
     RENDFUNC_DATA(double_emphasis)
@@ -572,6 +658,7 @@ public:
     RENDFUNC_DATA(triple_emphasis)
     RENDFUNC_DATA(strikethrough)
     RENDFUNC_DATA(superscript)
+    RENDFUNC_DATA(footnote_ref)
     RENDFUNC_DATA(entity)
     RENDFUNC_DATA(normal_text)
     RENDFUNC_DATA(doc_header)
@@ -599,6 +686,8 @@ public:
         RENDFUNC_MAKE(table, BUF3, void)
         RENDFUNC_MAKE(table_row, BUF2, void)
         RENDFUNC_MAKE(table_cell, BUF2INT, void)
+        RENDFUNC_MAKE(footnotes, BUF2, void)
+        RENDFUNC_MAKE(footnote_def, BUF2UINT, void)
         RENDFUNC_MAKE_AL(autolink, BUF2INT, int)
         RENDFUNC_MAKE(codespan, BUF2, int)
         RENDFUNC_MAKE(double_emphasis, BUF2, int)
@@ -610,6 +699,7 @@ public:
         RENDFUNC_MAKE(triple_emphasis, BUF2, int)
         RENDFUNC_MAKE(strikethrough, BUF2, int)
         RENDFUNC_MAKE(superscript, BUF2, int)
+        RENDFUNC_MAKE(footnote_ref, BUF1UINT, int)
         RENDFUNC_MAKE(entity, BUF2, void)
         RENDFUNC_MAKE(normal_text, BUF2, void)
         RENDFUNC_MAKE(doc_header, BUF1, void)
@@ -627,6 +717,8 @@ public:
         RENDFUNC_V8_DEF("table", table)
         RENDFUNC_V8_DEF("table_row", table_row)
         RENDFUNC_V8_DEF("table_cell", table_cell)
+        RENDFUNC_V8_DEF("footnotes", footnotes)
+        RENDFUNC_V8_DEF("footnote_def", footnote_def)
         RENDFUNC_V8_DEF("autolink", autolink)
         RENDFUNC_V8_DEF("codespan", codespan)
         RENDFUNC_V8_DEF("double_emphasis", double_emphasis)
@@ -638,6 +730,7 @@ public:
         RENDFUNC_V8_DEF("triple_emphasis", triple_emphasis)
         RENDFUNC_V8_DEF("strikethrough", strikethrough)
         RENDFUNC_V8_DEF("superscript", superscript)
+        RENDFUNC_V8_DEF("footnote_ref", footnote_ref)
         RENDFUNC_V8_DEF("entity", entity)
         RENDFUNC_V8_DEF("normal_text", normal_text)
         RENDFUNC_V8_DEF("doc_header", doc_header)
@@ -658,6 +751,8 @@ protected:
         RENDFUNC_WRAP(table, BUF3, void)
         RENDFUNC_WRAP(table_row, BUF2, void)
         RENDFUNC_WRAP(table_cell, BUF2INT, void)
+        RENDFUNC_WRAP(footnotes, BUF2, void)
+        RENDFUNC_WRAP(footnote_def, BUF2UINT, void)
         RENDFUNC_WRAP(autolink, BUF2INT, int)
         RENDFUNC_WRAP(codespan, BUF2, int)
         RENDFUNC_WRAP(double_emphasis, BUF2, int)
@@ -669,6 +764,7 @@ protected:
         RENDFUNC_WRAP(triple_emphasis, BUF2, int)
         RENDFUNC_WRAP(strikethrough, BUF2, int)
         RENDFUNC_WRAP(superscript, BUF2, int)
+        RENDFUNC_WRAP(footnote_ref, BUF1UINT, int)
         RENDFUNC_WRAP(entity, BUF2, void)
         RENDFUNC_WRAP(normal_text, BUF2, void)
         RENDFUNC_WRAP(doc_header, BUF1, void)
@@ -687,6 +783,8 @@ RENDFUNC_DEF(paragraph, BUF2, void)
 RENDFUNC_DEF(table, BUF3, void)
 RENDFUNC_DEF(table_row, BUF2, void)
 RENDFUNC_DEF(table_cell, BUF2INT, void)
+RENDFUNC_DEF(footnotes, BUF2, void)
+RENDFUNC_DEF(footnote_def, BUF2UINT, void)
 RENDFUNC_DEF(autolink, BUF2INT, int)
 RENDFUNC_DEF(codespan, BUF2, int)
 RENDFUNC_DEF(double_emphasis, BUF2, int)
@@ -698,6 +796,7 @@ RENDFUNC_DEF(raw_html_tag, BUF2, int)
 RENDFUNC_DEF(triple_emphasis, BUF2, int)
 RENDFUNC_DEF(strikethrough, BUF2, int)
 RENDFUNC_DEF(superscript, BUF2, int)
+RENDFUNC_DEF(footnote_ref, BUF1UINT, int)
 RENDFUNC_DEF(entity, BUF2, void)
 RENDFUNC_DEF(normal_text, BUF2, void)
 RENDFUNC_DEF(doc_header, BUF1, void)
@@ -735,7 +834,7 @@ public:
     V8_CL_GETTER(HtmlRendererWrap, Flags) {
         return scope.Close(Uint(((html_renderopt*)inst->data->ptr())->flags));
     } V8_GETTER_END()
-    
+
     NODE_DEF_TYPE("HtmlRenderer") {
         V8_INHERIT("robotskirt::RendererWrap");
 
@@ -840,7 +939,7 @@ public:
 
         V8_DEF_METHOD(Render, "render");
         V8_DEF_METHOD(RenderSync, "renderSync");
-        
+
         prot->GetFunction()->Set(Symbol("std"), Func(MakeStandard)->GetFunction());
 
         StoreTemplate("robotskirt::Markdown", prot);
@@ -913,7 +1012,7 @@ inline Markdown* newStdMarkdown(unsigned int extensions, unsigned int htmlflags,
 //    void setHeaderCount(int header_count) {handle.header_count=header_count;}
 //    void setCurrentLevel(int current_level) {current_level_ = current_level;}
 //    void setLevelOffset(int level_offset) {level_offset_ = level_offset;}
-//    
+//
 //    TocData() {}
 //    TocData(int header_count, int current_level, int level_offset) {
 //        handle.header_count = header_count;
@@ -922,12 +1021,12 @@ inline Markdown* newStdMarkdown(unsigned int extensions, unsigned int htmlflags,
 //    }
 //    TocData(TocData& other) : handle(other.handle) {}
 //    ~TocData() {}
-//    
+//
 //    static V8_CALLBACK(New, 0) {
 //        int arg0 = 0;
 //        int arg1 = 0;
 //        int arg2 = 0;
-//        
+//
 //        //Extract arguments
 //        if (args.Length() >= 1) {
 //            arg0 = CheckInt(args[0]);
@@ -938,7 +1037,7 @@ inline Markdown* newStdMarkdown(unsigned int extensions, unsigned int htmlflags,
 //                }
 //            }
 //        }
-//        
+//
 //        (new TocData(arg0, arg1, arg2))->Wrap(args.This());
 //        return args.This();
 //    } V8_WRAP_END()
@@ -976,7 +1075,7 @@ inline Markdown* newStdMarkdown(unsigned int extensions, unsigned int htmlflags,
 //private:
 //    unsigned int flags = 0;
 //public:
-//    
+//
 //};
 
 
@@ -1011,7 +1110,7 @@ namespace houdini {
   //JS [un]escaping
   HOUDINI_STANDARD_WRAPPER(EscapeJs, escape_js)
   HOUDINI_STANDARD_WRAPPER(UnescapeJs, unescape_js)
-  
+
   //URL [un]escaping
   HOUDINI_STANDARD_WRAPPER(EscapeUrl, escape_url)
   HOUDINI_STANDARD_WRAPPER(UnescapeUrl, unescape_url)
@@ -1033,10 +1132,10 @@ namespace houdini {
     return scope.Close(toString(*out));
   }
   HOUDINI_STANDARD_WRAPPER(UnescapeHtml, unescape_html)
-  
+
   //Additional HREF escaping
   HOUDINI_STANDARD_WRAPPER(EscapeHref, escape_href)
-  
+
   //Additional XML escaping
   HOUDINI_STANDARD_WRAPPER(EscapeXml, escape_xml)
 
@@ -1066,15 +1165,15 @@ V8_CALLBACK(SmartypantsHtml) {
   //Extract input
   CheckArguments(1, args);
   String::Utf8Value input (args[0]);
-  
+
   //Prepare
   BufWrap out (bufnew(SMARTYPANTS_OUTPUT_UNIT));
-  
+
   //GO!!
   sdhtml_smartypants(*out,
                      reinterpret_cast<const unsigned char*>(*input),
                      input.length());
-  
+
   //Finish
   return scope.Close(toString(*out));
 } V8_CALLBACK_END()
@@ -1102,6 +1201,7 @@ NODE_DEF_MAIN() {
     //Extension constants
     target->Set(Symbol("EXT_AUTOLINK"), Int(MKDEXT_AUTOLINK));
     target->Set(Symbol("EXT_FENCED_CODE"), Int(MKDEXT_FENCED_CODE));
+    target->Set(Symbol("EXT_FOOTNOTES"), Int(MKDEXT_FOOTNOTES));
     target->Set(Symbol("EXT_LAX_SPACING"), Int(MKDEXT_LAX_SPACING));
     target->Set(Symbol("EXT_NO_INTRA_EMPHASIS"), Int(MKDEXT_NO_INTRA_EMPHASIS));
     target->Set(Symbol("EXT_SPACE_HEADERS"), Int(MKDEXT_SPACE_HEADERS));
@@ -1125,7 +1225,7 @@ NODE_DEF_MAIN() {
     Local<Object> houdiniL = Obj();
     houdini::init(houdiniL);
     target->Set(Symbol("houdini"), houdiniL);
-    
+
     //SMARTYPANTS
     target->Set(Symbol("smartypantsHtml"), Func(SmartypantsHtml)->GetFunction());
 } NODE_DEF_MAIN_END(robotskirt)
