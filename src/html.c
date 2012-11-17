@@ -444,15 +444,15 @@ rndr_tablecell(struct buf *ob, const struct buf *text, int flags, void *opaque)
 
 	switch (flags & MKD_TABLE_ALIGNMASK) {
 	case MKD_TABLE_ALIGN_CENTER:
-		BUFPUTSL(ob, " align=\"center\">");
+		BUFPUTSL(ob, " style=\"text-align: center\">");
 		break;
 
 	case MKD_TABLE_ALIGN_L:
-		BUFPUTSL(ob, " align=\"left\">");
+		BUFPUTSL(ob, " style=\"text-align: left\">");
 		break;
 
 	case MKD_TABLE_ALIGN_R:
-		BUFPUTSL(ob, " align=\"right\">");
+		BUFPUTSL(ob, " style=\"text-align: right\">");
 		break;
 
 	default:
@@ -484,6 +484,54 @@ rndr_normal_text(struct buf *ob, const struct buf *text, void *opaque)
 {
 	if (text)
 		escape_html(ob, text->data, text->size);
+}
+
+static void
+rndr_footnotes(struct buf *ob, const struct buf *text, void *opaque)
+{
+	BUFPUTSL(ob, "<div class=\"footnotes\">\n<hr />\n<ol>\n");
+	
+	if (text)
+		bufput(ob, text->data, text->size);
+	
+	BUFPUTSL(ob, "\n</ol>\n</div>\n");
+}
+
+static void
+rndr_footnote_def(struct buf *ob, const struct buf *text, unsigned int num, void *opaque)
+{
+	size_t i = 0;
+	int pfound = 0;
+	
+	/* insert anchor at the end of first paragraph block */
+	if (text) {
+		while ((i+3) < text->size) {
+			if (text->data[i++] != '<') continue;
+			if (text->data[i++] != '/') continue;
+			if (text->data[i++] != 'p' && text->data[i] != 'P') continue;
+			if (text->data[i] != '>') continue;
+			i -= 3;
+			pfound = 1;
+			break;
+		}
+	}
+	
+	bufprintf(ob, "\n<li id=\"fn%d\">\n", num);
+	if (pfound) {
+		bufput(ob, text->data, i);
+		bufprintf(ob, "&nbsp;<a href=\"#fnref%d\" rev=\"footnote\">&#8617;</a>", num);
+		bufput(ob, text->data + i, text->size - i);
+	} else if (text) {
+		bufput(ob, text->data, text->size);
+	}
+	BUFPUTSL(ob, "</li>\n");
+}
+
+static int
+rndr_footnote_ref(struct buf *ob, unsigned int num, void *opaque)
+{
+	bufprintf(ob, "<sup id=\"fnref%d\"><a href=\"#fn%d\" rel=\"footnote\">%d</a></sup>", num, num, num);
+	return 1;
 }
 
 static void
@@ -554,6 +602,8 @@ sdhtml_toc_renderer(struct sd_callbacks *callbacks, struct html_renderopt *optio
 		NULL,
 		NULL,
 		NULL,
+		NULL,
+		NULL,
 
 		NULL,
 		rndr_codespan,
@@ -566,6 +616,7 @@ sdhtml_toc_renderer(struct sd_callbacks *callbacks, struct html_renderopt *optio
 		rndr_triple_emphasis,
 		rndr_strikethrough,
 		rndr_superscript,
+		NULL,
 
 		NULL,
 		NULL,
@@ -595,6 +646,8 @@ sdhtml_renderer(struct sd_callbacks *callbacks, struct html_renderopt *options, 
 		rndr_table,
 		rndr_tablerow,
 		rndr_tablecell,
+		rndr_footnotes,
+		rndr_footnote_def,
 
 		rndr_autolink,
 		rndr_codespan,
@@ -607,6 +660,7 @@ sdhtml_renderer(struct sd_callbacks *callbacks, struct html_renderopt *options, 
 		rndr_triple_emphasis,
 		rndr_strikethrough,
 		rndr_superscript,
+		rndr_footnote_ref,
 
 		NULL,
 		rndr_normal_text,
